@@ -20,38 +20,53 @@ class AppController extends Controller
         $fieldsStr = strtolower(implode(',',$recordArray[0]));
         $csvField = explode(',',$fieldsStr); // csv header
         array_shift($recordArray); // csv records
+
         $recordJsonArray = [];
         // assign header name as key in record array
-        for ($i=0; $i < count($recordArray) ; $i++) { 
+        for ($i=0; $i < count($recordArray); $i++) { 
             for ($j=0; $j < count($csvField); $j++) { 
-                $recordJsonArray[$i][$csvField[$j]] =  $recordArray[$i][$j];
+                if ($recordArray[$i][$j] != '') {
+                    $recordJsonArray[$i][$csvField[$j]] =  $recordArray[$i][$j];
+                }
             }
         }
 
         $templates = json_decode($request->templates);
-        // loop all templates
-        foreach ($templates as $key => $value) {
-            // merge subject and message strings 
-            $subject = $value->subject;
-            $message = $value->message;
-            $templateStr = $subject.' '.$message;
-            $templateArray = $this->getInterpolatedData($templateStr)[1];
-            
-            // check if array contains all array values from another array
-            $containsSearch = count(array_intersect($templateArray, $csvField)) == count($templateArray);
-            // check if constains search has a value or key is the last index in array
-            if ($containsSearch || $key == (count($templates) -1) ) {
-                $subjectArray = $this->getInterpolatedData($subject)[1];
-                $messageArray = $this->getInterpolatedData($message)[1];
-                
-                // set compiled template array
-                $compiledTemplateArray = [];
-                $compiledTemplateArray = $this->formatTemplate($compiledTemplateArray, 'subject', $subject, $recordJsonArray);
-                $compiledTemplateArray = $this->formatTemplate($compiledTemplateArray, 'message', $message, $recordJsonArray);
-                $compiledTemplateArray = $this->removeNoMatchingInterpolatedFields($subject, $message, $compiledTemplateArray);
-                break;  // stop the loop for template finding since there is a match
-            } 
-        }
+        $compiledTemplateArray = [];
+            // loop all records from csv
+            for ($i=0; $i < count($recordJsonArray); $i++) {
+                $currentRowKeys = array_keys($recordJsonArray[$i]);
+                // loop all templates
+                foreach ($templates as $key => $value) {
+                    // merge subject and message strings 
+                    $subject = $value->subject;
+                    $message = $value->message;
+                    $templateStr = $subject.' '.$message;
+                    $templateArray = $this->getInterpolatedData($templateStr)[1];
+
+                    // check if array contains all array values from another array
+                    $containsSearch = count(array_intersect($templateArray, $currentRowKeys)) == count($templateArray);
+
+                    // check if constains search has a value or key is the last index in array
+                    if ($containsSearch || $key == (count($templates) -1)) {
+                        $subjectArray = $this->getInterpolatedData($subject)[1];
+                        $messageArray = $this->getInterpolatedData($message)[1];
+
+                        // set compiled template array
+                        $tempTemplateArray = [];
+                        $tempTemplateArray = $this->formatTemplate($tempTemplateArray, 'subject', $subject, $recordJsonArray[$i]);
+                        $tempTemplateArray = $this->formatTemplate($tempTemplateArray, 'message', $message, $recordJsonArray[$i]);
+
+                        if ($key == (count($templates) -1)) {
+                            $tempTemplateArray = $this->removeNoMatchingInterpolatedFields($subject, $message, $tempTemplateArray);
+                        }
+                        // stop the loop for template finding since there is a match
+                        break;
+                      
+                    }
+                }
+                $compiledTemplateArray[] = $tempTemplateArray;
+            }
          return json_encode($compiledTemplateArray);
     }
 
@@ -59,13 +74,11 @@ class AppController extends Controller
         $subjectInterpolated = $this->getInterpolatedData($subject)[0];
         $messageInterpolated = $this->getInterpolatedData($message)[0];
         // replace all interpolated fields that has no match found in the csv headers
-        foreach ($templateArray as $key => $compiledValue) {
-            foreach ($subjectInterpolated as $value) {
-                $templateArray[$key]['subject'] = str_replace($value, '', $compiledValue['subject']);
-            }
-            foreach ($messageInterpolated as $value) {
-                $templateArray[$key]['message']  = str_replace($value, '', $compiledValue['message']);
-            }
+        foreach ($subjectInterpolated as $value) {
+            $templateArray['subject'] = str_replace($value, '', $templateArray['subject']);
+        }
+        foreach ($messageInterpolated as $value) {
+            $templateArray['message']  = str_replace($value, '', $templateArray['message']);
         }
 
         return $templateArray;
@@ -77,19 +90,14 @@ class AppController extends Controller
     }
 
     public function formatTemplate($templateArray, $templateKey, $templateField,  $recordJsonArray) {
-        // loop each rows in csv
-        for ($a=0; $a < count($recordJsonArray) ; $a++) { 
             $newTemplateField = $templateField;
-            // loop all headers that were interpolated
-            foreach ($recordJsonArray[$a] as $key => $recordJsonArrayIndex) {
+            foreach ($recordJsonArray as $key => $recordJsonArrayIndex) {
                 $newTemplateField = str_replace("{{".$key."}}",
                 $recordJsonArrayIndex, 
                 $newTemplateField);  
             }
-          
-            $templateArray[$a][$templateKey] = $newTemplateField;
-        }
-
-        return $templateArray; 
+  
+            $templateArray[$templateKey] = $newTemplateField;
+            return $templateArray; 
     }
 }
